@@ -48,3 +48,11 @@ class MongoProjectRepository(ProjectRepository):
         except (PyMongoError, ValidationError, KeyError, TypeError) as error:
             logger.exception("Failed to load project '%s' from MongoDB", project_id)
             raise RepositoryError("Failed to load project") from error
+
+    async def delete(self, project_id: str) -> bool:
+        try:
+            result = await self._collection.delete_one({"_id": project_id})
+            return result.deleted_count > 0
+        except PyMongoError as error:
+            logger.exception("Failed to delete project '%s' from MongoDB", project_id)
+            raise RepositoryError("Failed to delete project") from error

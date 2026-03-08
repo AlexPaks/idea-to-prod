@@ -16,4 +16,10 @@ export const projectsApi = {
   getById(projectId: string): Promise<Project> {
     return apiRequest<Project>(`/api/projects/${projectId}`);
   },
+
+  deleteById(projectId: string): Promise<void> {
+    return apiRequest<void>(`/api/projects/${projectId}`, {
+      method: "DELETE",
+    });
+  },
 };

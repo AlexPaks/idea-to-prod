@@ -1,25 +1,36 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { artifactsApi } from "../api/artifacts";
+import { createRunUpdatesSocket, isRunUpdatedMessage } from "../api/runUpdates";
 import { runsApi } from "../api/runs";
 import type { Artifact } from "../types/artifact";
 import type { WorkflowRun, WorkflowStepStatus } from "../types/workflowRun";
 
 const POLL_INTERVAL_MS = 2500;
+const WS_RECONNECT_DELAY_MS = 3000;
+type LiveConnectionState = "connecting" | "connected" | "disconnected";
 
 export function RunDetailsPage() {
+  const navigate = useNavigate();
   const { runId } = useParams<{ runId: string }>();
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
+  const [liveConnectionState, setLiveConnectionState] = useState<LiveConnectionState>("connecting");
   const [isLoading, setIsLoading] = useState(true);
+  const [isDeletingRun, setIsDeletingRun] = useState(false);
   const [error, setError] = useState("");
+  const artifactCountRef = useRef(0);
 
   const selectedArtifact = useMemo(
     () => artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? null,
     [artifacts, selectedArtifactId]
   );
+
+  useEffect(() => {
+    artifactCountRef.current = artifacts.length;
+  }, [artifacts.length]);
 
   useEffect(() => {
     if (!runId) {
@@ -42,18 +53,7 @@ export function RunDetailsPage() {
         }
 
         setRun(runData);
-        setArtifacts(artifactData);
-        setSelectedArtifactId((current) => {
-          if (artifactData.length === 0) {
-            return null;
-          }
-
-          if (current && artifactData.some((artifact) => artifact.id === current)) {
-            return current;
-          }
-
-          return artifactData[0].id;
-        });
+        applyArtifacts(artifactData);
 
         setError("");
         setIsLoading(false);
@@ -66,6 +66,21 @@ export function RunDetailsPage() {
       }
     };
 
+    const applyArtifacts = (artifactData: Artifact[]) => {
+      setArtifacts(artifactData);
+      setSelectedArtifactId((current) => {
+        if (artifactData.length === 0) {
+          return null;
+        }
+
+        if (current && artifactData.some((artifact) => artifact.id === current)) {
+          return current;
+        }
+
+        return artifactData[0].id;
+      });
+    };
+
     void loadRunData();
     const intervalId = window.setInterval(() => {
       void loadRunData();
@@ -74,6 +89,107 @@ export function RunDetailsPage() {
     return () => {
       isMounted = false;
       window.clearInterval(intervalId);
+    };
+  }, [runId]);
+
+  useEffect(() => {
+    if (!runId) {
+      setLiveConnectionState("disconnected");
+      return;
+    }
+
+    let isClosed = false;
+    let reconnectTimer: number | undefined;
+    let socket: WebSocket | null = null;
+
+    const applyArtifacts = (artifactData: Artifact[]) => {
+      setArtifacts(artifactData);
+      setSelectedArtifactId((current) => {
+        if (artifactData.length === 0) {
+          return null;
+        }
+
+        if (current && artifactData.some((artifact) => artifact.id === current)) {
+          return current;
+        }
+
+        return artifactData[0].id;
+      });
+    };
+
+    const refreshArtifacts = async () => {
+      try {
+        const artifactData = await artifactsApi.listByRunId(runId);
+        if (!isClosed) {
+          applyArtifacts(artifactData);
+        }
+      } catch {
+        // Polling still runs as a fallback. Swallow transient websocket-sync failures.
+      }
+    };
+
+    const connect = () => {
+      if (isClosed) {
+        return;
+      }
+
+      setLiveConnectionState("connecting");
+      socket = createRunUpdatesSocket(runId);
+
+      socket.onopen = () => {
+        if (!isClosed) {
+          setLiveConnectionState("connected");
+        }
+      };
+
+      socket.onmessage = (event) => {
+        if (isClosed) {
+          return;
+        }
+
+        try {
+          const parsed: unknown = JSON.parse(event.data);
+          if (!isRunUpdatedMessage(parsed) || parsed.run.id !== runId) {
+            return;
+          }
+
+          setRun(parsed.run);
+          setError("");
+
+          if (parsed.run.artifacts.length !== artifactCountRef.current) {
+            void refreshArtifacts();
+          }
+        } catch {
+          // Ignore malformed websocket messages and keep polling fallback active.
+        }
+      };
+
+      socket.onerror = () => {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.close();
+        }
+      };
+
+      socket.onclose = () => {
+        if (isClosed) {
+          return;
+        }
+
+        setLiveConnectionState("disconnected");
+        reconnectTimer = window.setTimeout(connect, WS_RECONNECT_DELAY_MS);
+      };
+    };
+
+    connect();
+
+    return () => {
+      isClosed = true;
+      if (reconnectTimer !== undefined) {
+        window.clearTimeout(reconnectTimer);
+      }
+      if (socket && socket.readyState <= WebSocket.OPEN) {
+        socket.close();
+      }
     };
   }, [runId]);
 
@@ -89,11 +205,42 @@ export function RunDetailsPage() {
     return <p className="muted">Run not found.</p>;
   }
 
+  const onDeleteRun = async () => {
+    const shouldDelete = window.confirm(
+      `Delete run "${run.id}" and all related artifacts?`
+    );
+    if (!shouldDelete) {
+      return;
+    }
+
+    setIsDeletingRun(true);
+    setError("");
+
+    try {
+      await runsApi.deleteById(run.id);
+      navigate(`/projects/${run.project_id}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setError(message);
+      setIsDeletingRun(false);
+    }
+  };
+
   return (
     <section className="stack">
       <div className="row">
         <h2>Run Details</h2>
-        <Link to={`/projects/${run.project_id}`}>Back to project</Link>
+        <div className="row-actions">
+          <Link to={`/projects/${run.project_id}`}>Back to project</Link>
+          <button
+            type="button"
+            className="button button-danger"
+            disabled={isDeletingRun}
+            onClick={onDeleteRun}
+          >
+            {isDeletingRun ? "Deleting..." : "Delete Run"}
+          </button>
+        </div>
       </div>
 
       <div className="card stack">
@@ -111,6 +258,14 @@ export function RunDetailsPage() {
         </p>
         <p>
           <strong>Updated:</strong> {new Date(run.updated_at).toLocaleString()}
+        </p>
+        <p>
+          <strong>Live Updates:</strong>{" "}
+          <span className={liveConnectionState === "connected" ? "ok" : "muted"}>
+            {liveConnectionState === "connected"
+              ? "connected"
+              : `${liveConnectionState} (polling fallback active)`}
+          </span>
         </p>
       </div>
 

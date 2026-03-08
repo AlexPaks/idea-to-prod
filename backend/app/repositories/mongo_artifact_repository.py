@@ -58,3 +58,11 @@ class MongoArtifactRepository(ArtifactRepository):
         except (PyMongoError, ValidationError, KeyError, TypeError) as error:
             logger.exception("Failed to list artifacts for run '%s'", run_id)
             raise RepositoryError("Failed to list artifacts") from error
+
+    async def delete_by_run_id(self, run_id: str) -> int:
+        try:
+            result = await self._collection.delete_many({"run_id": run_id})
+            return result.deleted_count
+        except PyMongoError as error:
+            logger.exception("Failed to delete artifacts for run '%s'", run_id)
+            raise RepositoryError("Failed to delete artifacts") from error

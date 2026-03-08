@@ -74,3 +74,11 @@ class MongoWorkflowRunRepository(WorkflowRunRepository):
         except (PyMongoError, ValidationError, KeyError, TypeError) as error:
             logger.exception("Failed to list workflow runs for project '%s'", project_id)
             raise RepositoryError("Failed to list workflow runs") from error
+
+    async def delete(self, run_id: str) -> bool:
+        try:
+            result = await self._collection.delete_one({"_id": run_id})
+            return result.deleted_count > 0
+        except PyMongoError as error:
+            logger.exception("Failed to delete workflow run '%s'", run_id)
+            raise RepositoryError("Failed to delete workflow run") from error

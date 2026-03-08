@@ -6,6 +6,7 @@ from uuid import uuid4
 from app.models.artifact import Artifact
 from app.models.project import Project
 from app.models.workflow_run import WorkflowRun, WorkflowStepName
+from app.orchestration.run_update_publisher import RunUpdatePublisher
 from app.repositories.artifact_repository import ArtifactRepository
 from app.repositories.errors import RepositoryError
 from app.repositories.project_repository import ProjectRepository
@@ -28,6 +29,7 @@ class MockWorkflowOrchestrator:
         project_repository: ProjectRepository,
         artifact_repository: ArtifactRepository,
         stage_services: list[WorkflowStageService],
+        run_update_publisher: RunUpdatePublisher | None = None,
         step_delay_seconds: float = 2.5,
     ) -> None:
         self._run_repository = run_repository
@@ -36,6 +38,7 @@ class MockWorkflowOrchestrator:
         self._stage_services = {
             service.step_name: service for service in stage_services
         }
+        self._run_update_publisher = run_update_publisher
         self._step_delay_seconds = step_delay_seconds
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -78,9 +81,10 @@ class MockWorkflowOrchestrator:
                 if completed_step is not None:
                     await self._execute_stage(next_run, completed_step)
 
-                await self._run_repository.update(next_run)
+                updated_run = await self._run_repository.update(next_run)
+                await self._publish_run_update(updated_run)
 
-                if next_run.status == "completed":
+                if updated_run.status == "completed":
                     return
         except asyncio.CancelledError:
             logger.info("Cancelled mock orchestration for run '%s'", run_id)
@@ -146,6 +150,14 @@ class MockWorkflowOrchestrator:
             result.summary,
         )
         run.updated_at = datetime.now(timezone.utc)
+
+    async def _publish_run_update(self, run: WorkflowRun) -> None:
+        if self._run_update_publisher is None:
+            return
+        try:
+            await self._run_update_publisher.publish_run_update(run)
+        except Exception:
+            logger.exception("Failed to publish websocket run update for '%s'", run.id)
 
 
 def _build_artifact(
