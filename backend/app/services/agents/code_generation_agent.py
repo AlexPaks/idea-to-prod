@@ -1,0 +1,53 @@
+import logging
+
+from app.services.agents._common import build_agent, execute_agent, parse_model_result
+from app.services.schemas.architecture_result import ArchitectureResult
+from app.services.schemas.code_generation_result import CodeGenerationResult
+from app.services.schemas.design_result import DesignResult
+
+logger = logging.getLogger(__name__)
+
+
+class CodeGenerationAgent:
+    def __init__(self) -> None:
+        self.agent = build_agent(
+            name="code-generation",
+            prompt_file="code_generation_prompt.md",
+        )
+
+    async def run(
+        self,
+        idea: str,
+        architecture: ArchitectureResult,
+        detailed_design: DesignResult,
+    ) -> CodeGenerationResult:
+        logger.info("stage=code_generation event=start")
+        payload = {
+            "user_idea": idea,
+            "architecture": architecture.model_dump(),
+            "detailed_design": detailed_design.model_dump(),
+        }
+
+        try:
+            result = await execute_agent(self.agent, payload)
+            typed = parse_model_result(
+                "code_generation",
+                result,
+                CodeGenerationResult,
+                fallback=CodeGenerationResult(
+                    files=[
+                        {
+                            "path": "README.md",
+                            "content": (
+                                "# Generated Project\n\n"
+                                "This is placeholder generated code output."
+                            ),
+                        }
+                    ]
+                ),
+            )
+            logger.info("stage=code_generation event=complete")
+            return typed
+        except Exception:
+            logger.exception("stage=code_generation event=error")
+            raise
