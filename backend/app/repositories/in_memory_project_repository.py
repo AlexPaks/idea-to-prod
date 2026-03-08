@@ -22,3 +22,8 @@ class InMemoryProjectRepository(ProjectRepository):
     async def get_by_id(self, project_id: str) -> Project | None:
         with self._lock:
             return self._projects.get(project_id)
+
+    async def delete(self, project_id: str) -> bool:
+        with self._lock:
+            removed = self._projects.pop(project_id, None)
+        return removed is not None

@@ -13,6 +13,8 @@ export function ProjectDetailsPage() {
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isStarting, setIsStarting] = useState(false);
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -63,6 +65,54 @@ export function ProjectDetailsPage() {
     }
   };
 
+  const onDeleteProject = async () => {
+    if (!projectId || !project) {
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      `Delete project "${project.name}" and all related runs/artifacts?`
+    );
+    if (!shouldDelete) {
+      return;
+    }
+
+    setIsDeletingProject(true);
+    setError("");
+
+    try {
+      await projectsApi.deleteById(projectId);
+      navigate("/projects");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setError(message);
+    } finally {
+      setIsDeletingProject(false);
+    }
+  };
+
+  const onDeleteRun = async (runId: string) => {
+    const shouldDelete = window.confirm(
+      `Delete run "${runId}" and all related artifacts?`
+    );
+    if (!shouldDelete) {
+      return;
+    }
+
+    setDeletingRunId(runId);
+    setError("");
+
+    try {
+      await runsApi.deleteById(runId);
+      setRuns((current) => current.filter((run) => run.id !== runId));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setError(message);
+    } finally {
+      setDeletingRunId(null);
+    }
+  };
+
   if (isLoading) {
     return <p>Loading project details...</p>;
   }
@@ -101,6 +151,14 @@ export function ProjectDetailsPage() {
       <button type="button" className="button" disabled={isStarting} onClick={onStartGeneration}>
         {isStarting ? "Starting..." : "Start Generation"}
       </button>
+      <button
+        type="button"
+        className="button button-danger"
+        disabled={isDeletingProject}
+        onClick={onDeleteProject}
+      >
+        {isDeletingProject ? "Deleting Project..." : "Delete Project"}
+      </button>
 
       <section className="stack">
         <h3>Workflow Runs</h3>
@@ -119,7 +177,17 @@ export function ProjectDetailsPage() {
                 <p>
                   <strong>Current Step:</strong> {run.current_step ?? "-"}
                 </p>
-                <Link to={`/runs/${run.id}`}>View run details</Link>
+                <div className="row-actions">
+                  <Link to={`/runs/${run.id}`}>View run details</Link>
+                  <button
+                    type="button"
+                    className="button button-danger"
+                    disabled={deletingRunId === run.id}
+                    onClick={() => onDeleteRun(run.id)}
+                  >
+                    {deletingRunId === run.id ? "Deleting..." : "Delete Run"}
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

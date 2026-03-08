@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.artifacts import router as artifacts_router
 from app.api.projects import router as projects_router
+from app.api.run_updates_ws import router as run_updates_ws_router
 from app.api.workflow_runs import router as workflow_runs_router
 from app.core.logging_config import configure_logging
 from app.core.settings import get_settings
@@ -16,6 +17,7 @@ from app.repositories.mongo_artifact_repository import MongoArtifactRepository
 from app.repositories.mongo_project_repository import MongoProjectRepository
 from app.repositories.mongo_workflow_run_repository import MongoWorkflowRunRepository
 from app.orchestration.mock_workflow_orchestrator import MockWorkflowOrchestrator
+from app.realtime.run_updates_hub import RunUpdatesHub
 from app.services.artifact_service import ArtifactService
 from app.services.project_service import ProjectService
 from app.services.workflow_stages import (
@@ -53,6 +55,7 @@ async def lifespan(app: FastAPI):
         )
         await workflow_run_repository.ensure_indexes()
         await artifact_repository.ensure_indexes()
+        run_updates_hub = RunUpdatesHub()
         orchestrator = MockWorkflowOrchestrator(
             workflow_run_repository,
             project_repository,
@@ -64,15 +67,23 @@ async def lifespan(app: FastAPI):
                 TestGenerationService(),
                 TestExecutionService(),
             ],
+            run_update_publisher=run_updates_hub,
             step_delay_seconds=settings.mock_workflow_step_delay_seconds,
         )
 
         app.state.mongo = resources
-        app.state.project_service = ProjectService(project_repository)
+        app.state.run_updates_hub = run_updates_hub
+        app.state.project_service = ProjectService(
+            repository=project_repository,
+            run_repository=workflow_run_repository,
+            artifact_repository=artifact_repository,
+        )
         app.state.workflow_run_service = WorkflowRunService(
             run_repository=workflow_run_repository,
             project_repository=project_repository,
+            artifact_repository=artifact_repository,
             orchestrator=orchestrator,
+            run_update_publisher=run_updates_hub,
         )
         app.state.artifact_service = ArtifactService(
             artifact_repository=artifact_repository,
@@ -102,6 +113,7 @@ app.add_middleware(
 app.include_router(projects_router)
 app.include_router(workflow_runs_router)
 app.include_router(artifacts_router)
+app.include_router(run_updates_ws_router)
 
 
 @app.exception_handler(RepositoryError)

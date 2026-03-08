@@ -44,3 +44,14 @@ async def list_project_runs(
         return await run_service.list_project_runs(project_id)
     except EntityNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.delete("/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_run(
+    run_id: str,
+    run_service: Annotated[WorkflowRunService, Depends(get_workflow_run_service)],
+) -> None:
+    try:
+        await run_service.delete_run(run_id)
+    except EntityNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error

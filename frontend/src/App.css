@@ -69,6 +69,12 @@ a:hover {
   gap: 1rem;
 }
 
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
 .cards {
   list-style: none;
   padding: 0;
@@ -117,6 +123,14 @@ button {
 .button:hover,
 button:hover {
   background: #1346a0;
+}
+
+.button-danger {
+  background: #b42318;
+}
+
+.button-danger:hover {
+  background: #9f1e15;
 }
 
 button:disabled {

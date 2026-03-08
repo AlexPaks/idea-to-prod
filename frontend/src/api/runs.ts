@@ -15,4 +15,10 @@ export const runsApi = {
   listForProject(projectId: string): Promise<WorkflowRun[]> {
     return apiRequest<WorkflowRun[]>(`/api/projects/${projectId}/runs`);
   },
+
+  deleteById(runId: string): Promise<void> {
+    return apiRequest<void>(`/api/runs/${runId}`, {
+      method: "DELETE",
+    });
+  },
 };
