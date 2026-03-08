@@ -9,6 +9,7 @@ from app.repositories.artifact_repository import ArtifactRepository
 from app.repositories.project_repository import ProjectRepository
 from app.repositories.workflow_run_repository import WorkflowRunRepository
 from app.services.errors import EntityNotFoundError
+from app.services.run_workspace_service import RunWorkspaceService
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +22,14 @@ class WorkflowRunService:
         artifact_repository: ArtifactRepository,
         orchestrator: MockWorkflowOrchestrator,
         run_update_publisher: RunUpdatePublisher | None = None,
+        workspace_service: RunWorkspaceService | None = None,
     ) -> None:
         self._run_repository = run_repository
         self._project_repository = project_repository
         self._artifact_repository = artifact_repository
         self._orchestrator = orchestrator
         self._run_update_publisher = run_update_publisher
+        self._workspace_service = workspace_service
 
     async def start_run(self, project_id: str) -> WorkflowRun:
         project = await self._project_repository.get_by_id(project_id)
@@ -55,6 +58,9 @@ class WorkflowRunService:
             execution_event_ids=[],
         )
 
+        if self._workspace_service is not None:
+            self._workspace_service.initialize_run_workspace(run.id)
+
         created = await self._run_repository.create(run)
         await self._publish_run_update(created)
         self._orchestrator.schedule_run(created.id)
@@ -76,6 +82,8 @@ class WorkflowRunService:
 
         await self._artifact_repository.delete_by_run_id(run_id)
         await self._run_repository.delete(run_id)
+        if self._workspace_service is not None:
+            self._workspace_service.delete_run_workspace(run_id)
 
     async def _publish_run_update(self, run: WorkflowRun) -> None:
         if self._run_update_publisher is None:

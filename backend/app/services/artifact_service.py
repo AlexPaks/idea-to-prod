@@ -18,7 +18,8 @@ class ArtifactService:
         if run is None:
             raise EntityNotFoundError(f"Run '{run_id}' not found")
 
-        return await self._artifact_repository.list_by_run_id(run_id)
+        artifacts = await self._artifact_repository.list_by_run_id(run_id)
+        return [item for item in artifacts if item.artifact_type != "generated_file"]
 
     async def get_artifact(self, artifact_id: str) -> Artifact | None:
         return await self._artifact_repository.get_by_id(artifact_id)
