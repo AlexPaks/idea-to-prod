@@ -11,7 +11,6 @@ from app.api.workflow_runs import router as workflow_runs_router
 from app.core.logging_config import configure_logging
 from app.core.settings import get_settings
 from app.db.mongo import MongoResources, connect_to_mongo, disconnect_from_mongo
-from app.orchestration.mock_artifact_generator import MockArtifactGenerator
 from app.repositories.errors import RepositoryError
 from app.repositories.mongo_artifact_repository import MongoArtifactRepository
 from app.repositories.mongo_project_repository import MongoProjectRepository
@@ -19,6 +18,13 @@ from app.repositories.mongo_workflow_run_repository import MongoWorkflowRunRepos
 from app.orchestration.mock_workflow_orchestrator import MockWorkflowOrchestrator
 from app.services.artifact_service import ArtifactService
 from app.services.project_service import ProjectService
+from app.services.workflow_stages import (
+    CodeGenerationService,
+    DetailedDesignService,
+    HighLevelDesignService,
+    TestExecutionService,
+    TestGenerationService,
+)
 from app.services.workflow_run_service import WorkflowRunService
 
 logger = logging.getLogger(__name__)
@@ -51,7 +57,13 @@ async def lifespan(app: FastAPI):
             workflow_run_repository,
             project_repository,
             artifact_repository,
-            MockArtifactGenerator(),
+            stage_services=[
+                HighLevelDesignService(),
+                DetailedDesignService(),
+                CodeGenerationService(),
+                TestGenerationService(),
+                TestExecutionService(),
+            ],
             step_delay_seconds=settings.mock_workflow_step_delay_seconds,
         )
 

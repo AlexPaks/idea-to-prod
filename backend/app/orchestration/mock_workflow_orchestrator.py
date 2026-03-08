@@ -3,14 +3,18 @@ import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from app.models.artifact import Artifact, ArtifactType
+from app.models.artifact import Artifact
 from app.models.project import Project
 from app.models.workflow_run import WorkflowRun, WorkflowStepName
-from app.orchestration.mock_artifact_generator import MockArtifactGenerator
 from app.repositories.artifact_repository import ArtifactRepository
 from app.repositories.errors import RepositoryError
 from app.repositories.project_repository import ProjectRepository
 from app.repositories.workflow_run_repository import WorkflowRunRepository
+from app.services.workflow_stage_models import (
+    StageArtifactDraft,
+    StageExecutionContext,
+    WorkflowStageService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +27,15 @@ class MockWorkflowOrchestrator:
         run_repository: WorkflowRunRepository,
         project_repository: ProjectRepository,
         artifact_repository: ArtifactRepository,
-        artifact_generator: MockArtifactGenerator,
+        stage_services: list[WorkflowStageService],
         step_delay_seconds: float = 2.5,
     ) -> None:
         self._run_repository = run_repository
         self._project_repository = project_repository
         self._artifact_repository = artifact_repository
-        self._artifact_generator = artifact_generator
+        self._stage_services = {
+            service.step_name: service for service in stage_services
+        }
         self._step_delay_seconds = step_delay_seconds
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -70,7 +76,7 @@ class MockWorkflowOrchestrator:
 
                 next_run, completed_step = _advance_run(run)
                 if completed_step is not None:
-                    await self._create_artifact_for_step(next_run, completed_step)
+                    await self._execute_stage(next_run, completed_step)
 
                 await self._run_repository.update(next_run)
 
@@ -84,44 +90,76 @@ class MockWorkflowOrchestrator:
         except Exception:
             logger.exception("Unexpected failure while orchestrating run '%s'", run_id)
 
-    async def _create_artifact_for_step(
+    async def _execute_stage(
         self,
         run: WorkflowRun,
         completed_step: WorkflowStepName,
     ) -> None:
+        stage_service = self._stage_services.get(completed_step)
+        if stage_service is None:
+            logger.debug(
+                "No stage service configured for step '%s' in run '%s'",
+                completed_step,
+                run.id,
+            )
+            return
+
         project = await self._project_repository.get_by_id(run.project_id)
         if project is None:
             logger.warning(
-                "Skipping artifact generation for run '%s': project '%s' missing",
+                "Skipping stage execution '%s' for run '%s': project '%s' missing",
+                completed_step,
                 run.id,
                 run.project_id,
             )
             return
 
-        draft = self._artifact_generator.generate(completed_step, project)
-        if draft is None:
-            return
+        context = StageExecutionContext(
+            run=run,
+            project=project,
+            step=completed_step,
+            triggered_at=datetime.now(timezone.utc),
+        )
+        result = await stage_service.execute(context)
 
-        artifact = _build_artifact(run, project, draft.artifact_type, draft.title, draft.content)
-        created = await self._artifact_repository.create(artifact)
-        run.artifacts.append(created.id)
+        if result.step != completed_step:
+            logger.warning(
+                "Stage service mismatch for run '%s': expected '%s', got '%s'",
+                run.id,
+                completed_step,
+                result.step,
+            )
+
+        for log_line in result.logs:
+            logger.info("Run '%s' stage '%s': %s", run.id, completed_step, log_line)
+
+        for draft in result.artifacts:
+            artifact = _build_artifact(run, project, draft)
+            created = await self._artifact_repository.create(artifact)
+            run.artifacts.append(created.id)
+
+        logger.info(
+            "Completed stage '%s' for run '%s' with status '%s' (%s)",
+            completed_step,
+            run.id,
+            result.status,
+            result.summary,
+        )
         run.updated_at = datetime.now(timezone.utc)
 
 
 def _build_artifact(
     run: WorkflowRun,
     project: Project,
-    artifact_type: ArtifactType,
-    title: str,
-    content: str,
+    artifact: StageArtifactDraft,
 ) -> Artifact:
     return Artifact(
         id=str(uuid4()),
         run_id=run.id,
         project_id=project.id,
-        artifact_type=artifact_type,
-        title=title,
-        content=content,
+        artifact_type=artifact.artifact_type,
+        title=artifact.title,
+        content=artifact.content,
         created_at=datetime.now(timezone.utc),
     )
 
