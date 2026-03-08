@@ -1,0 +1,13 @@
+from typing import Protocol
+
+from app.models.workflow_run import WorkflowRun
+
+
+class WorkflowRunRepository(Protocol):
+    async def create(self, run: WorkflowRun) -> WorkflowRun: ...
+
+    async def update(self, run: WorkflowRun) -> WorkflowRun: ...
+
+    async def get_by_id(self, run_id: str) -> WorkflowRun | None: ...
+
+    async def list_by_project_id(self, project_id: str) -> list[WorkflowRun]: ...

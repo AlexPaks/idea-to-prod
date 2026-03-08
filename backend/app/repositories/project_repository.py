@@ -1,0 +1,11 @@
+from typing import Protocol
+
+from app.models.project import Project
+
+
+class ProjectRepository(Protocol):
+    async def create(self, project: Project) -> Project: ...
+
+    async def list(self) -> list[Project]: ...
+
+    async def get_by_id(self, project_id: str) -> Project | None: ...
