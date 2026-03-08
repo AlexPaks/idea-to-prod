@@ -15,6 +15,9 @@ class Settings:
     mock_workflow_step_delay_seconds: float
     test_runner_timeout_seconds: float
     generated_runs_root_dir: str
+    llm_provider: str
+    openai_api_key: str
+    gemini_api_key: str
 
 
 def _split_csv(value: str) -> list[str]:
@@ -55,4 +58,7 @@ def get_settings() -> Settings:
         ),
         test_runner_timeout_seconds=_read_float("TEST_RUNNER_TIMEOUT_SECONDS", 60.0),
         generated_runs_root_dir=os.getenv("GENERATED_RUNS_ROOT_DIR", "generated_runs"),
+        llm_provider=os.getenv("LLM_PROVIDER", "openai"),
+        openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+        gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
     )

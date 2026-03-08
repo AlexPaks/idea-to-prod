@@ -21,6 +21,8 @@ from app.orchestration.mock_workflow_orchestrator import MockWorkflowOrchestrato
 from app.realtime.run_updates_hub import RunUpdatesHub
 from app.services.artifact_service import ArtifactService
 from app.services.generated_file_service import GeneratedFileService
+from app.services.llm.llm_client import LLMClient
+from app.services.llm.prompt_loader import PromptLoader
 from app.services.local_test_runner_service import LocalTestRunnerService
 from app.services.project_service import ProjectService
 from app.services.run_workspace_service import RunWorkspaceService
@@ -61,6 +63,12 @@ async def lifespan(app: FastAPI):
         await artifact_repository.ensure_indexes()
         run_updates_hub = RunUpdatesHub()
         workspace_service = RunWorkspaceService(settings.generated_runs_root_dir)
+        llm_client = LLMClient(
+            provider=settings.llm_provider,
+            openai_api_key=settings.openai_api_key,
+            gemini_api_key=settings.gemini_api_key,
+        )
+        prompt_loader = PromptLoader()
         test_runner_service = LocalTestRunnerService(
             timeout_seconds=settings.test_runner_timeout_seconds
         )
@@ -69,8 +77,8 @@ async def lifespan(app: FastAPI):
             project_repository,
             artifact_repository,
             stage_services=[
-                HighLevelDesignService(),
-                DetailedDesignService(),
+                HighLevelDesignService(llm_client, prompt_loader),
+                DetailedDesignService(llm_client, prompt_loader),
                 CodeGenerationService(),
                 TestGenerationService(),
                 TestExecutionService(test_runner_service, workspace_service),
