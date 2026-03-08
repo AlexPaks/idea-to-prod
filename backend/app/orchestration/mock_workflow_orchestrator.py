@@ -15,6 +15,7 @@ from app.services.run_workspace_service import RunWorkspaceService, WorkspaceFil
 from app.services.workflow_stage_models import (
     StageArtifactDraft,
     StageExecutionContext,
+    StageExecutionResult,
     StageGeneratedFileDraft,
     WorkflowStageService,
 )
@@ -83,7 +84,11 @@ class MockWorkflowOrchestrator:
 
                 next_run, completed_step = _advance_run(run)
                 if completed_step is not None:
-                    await self._execute_stage(next_run, completed_step)
+                    stage_result = await self._execute_stage(next_run, completed_step)
+                    if stage_result is not None and stage_result.test_result is not None:
+                        next_run.test_result = stage_result.test_result
+                    if stage_result is not None and stage_result.status == "failed":
+                        _mark_run_failed(next_run, completed_step)
 
                 updated_run = await self._run_repository.update(next_run)
                 await self._publish_run_update(updated_run)
@@ -102,7 +107,7 @@ class MockWorkflowOrchestrator:
         self,
         run: WorkflowRun,
         completed_step: WorkflowStepName,
-    ) -> None:
+    ) -> StageExecutionResult | None:
         stage_service = self._stage_services.get(completed_step)
         if stage_service is None:
             logger.debug(
@@ -110,7 +115,7 @@ class MockWorkflowOrchestrator:
                 completed_step,
                 run.id,
             )
-            return
+            return None
 
         project = await self._project_repository.get_by_id(run.project_id)
         if project is None:
@@ -120,7 +125,7 @@ class MockWorkflowOrchestrator:
                 run.id,
                 run.project_id,
             )
-            return
+            return None
 
         context = StageExecutionContext(
             run=run,
@@ -166,6 +171,7 @@ class MockWorkflowOrchestrator:
             result.summary,
         )
         run.updated_at = datetime.now(timezone.utc)
+        return result
 
     async def _publish_run_update(self, run: WorkflowRun) -> None:
         if self._run_update_publisher is None:
@@ -250,3 +256,26 @@ def _advance_run(run: WorkflowRun) -> tuple[WorkflowRun, WorkflowStepName | None
     next_state.current_step = following.name
     next_state.status = "running"
     return next_state, current.name
+
+
+def _mark_run_failed(run: WorkflowRun, failed_step: WorkflowStepName) -> None:
+    now = datetime.now(timezone.utc)
+    run.status = "failed"
+    run.current_step = failed_step
+    run.updated_at = now
+
+    failed_index = next(
+        (index for index, step in enumerate(run.steps) if step.name == failed_step),
+        -1,
+    )
+    if failed_index < 0:
+        return
+
+    failed = run.steps[failed_index]
+    failed.status = "failed"
+    failed.completed_at = now
+
+    for step in run.steps[failed_index + 1 :]:
+        if step.status == "in_progress":
+            step.status = "pending"
+            step.started_at = None

@@ -10,7 +10,10 @@ import type {
   GeneratedFileContent,
   GeneratedFileMetadata,
 } from "../types/generatedFile";
-import type { WorkflowRun, WorkflowStepStatus } from "../types/workflowRun";
+import type {
+  WorkflowRun,
+  WorkflowStepStatus,
+} from "../types/workflowRun";
 
 const POLL_INTERVAL_MS = 2500;
 const WS_RECONNECT_DELAY_MS = 3000;
@@ -356,6 +359,42 @@ export function RunDetailsPage() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="stack">
+        <h3>Test Results</h3>
+        {run.test_result ? (
+          <div className="card stack">
+            <div className="row">
+              <span
+                className={`step-badge ${
+                  run.test_result.status === "passed" ? "step-completed" : "step-failed"
+                }`}
+              >
+                {run.test_result.status}
+              </span>
+              <span className="muted">
+                {new Date(run.test_result.executed_at).toLocaleString()}
+              </span>
+            </div>
+            <p>
+              <strong>Summary:</strong> {run.test_result.summary}
+            </p>
+            <p>
+              <strong>Exit Code:</strong> {run.test_result.exit_code}
+            </p>
+            <details>
+              <summary>stdout</summary>
+              <pre className="code-viewer">{run.test_result.stdout || "(empty)"}</pre>
+            </details>
+            <details>
+              <summary>stderr</summary>
+              <pre className="code-viewer">{run.test_result.stderr || "(empty)"}</pre>
+            </details>
+          </div>
+        ) : (
+          <p className="muted">No real test results recorded yet.</p>
+        )}
       </section>
 
       <section className="stack">

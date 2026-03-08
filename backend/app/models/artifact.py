@@ -8,6 +8,7 @@ ArtifactType = Literal[
     "detailed_design",
     "code_summary",
     "test_summary",
+    "test_result",
     "generated_file",
 ]
 

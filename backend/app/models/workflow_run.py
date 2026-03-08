@@ -33,6 +33,15 @@ class WorkflowStep(BaseModel):
     completed_at: datetime | None = None
 
 
+class WorkflowTestResult(BaseModel):
+    exit_code: int
+    stdout: str
+    stderr: str
+    status: Literal["passed", "failed"]
+    summary: str
+    executed_at: datetime
+
+
 class WorkflowRun(BaseModel):
     id: str
     project_id: str
@@ -43,3 +52,4 @@ class WorkflowRun(BaseModel):
     updated_at: datetime
     artifacts: list[str] = Field(default_factory=list)
     execution_event_ids: list[str] = Field(default_factory=list)
+    test_result: WorkflowTestResult | None = None
