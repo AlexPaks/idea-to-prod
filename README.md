@@ -1,11 +1,12 @@
-# IdeaToProd - Phase 4
+# IdeaToProd - Phase 5
 
-Phase 4 includes:
+Phase 5 includes:
 - `backend`: FastAPI API
 - `frontend`: React + Vite + TypeScript app
 - `mongodb`: persistent storage for projects
 - `.vscode`: optional launch/tasks setup for local development
 - mocked workflow orchestration for generation runs
+- artifact generation and run artifact viewing
 
 ## Project Structure
 
@@ -83,6 +84,8 @@ Workflow run API endpoints:
 - `POST /api/projects/{project_id}/runs`
 - `GET /api/runs/{run_id}`
 - `GET /api/projects/{project_id}/runs`
+- `GET /api/runs/{run_id}/artifacts`
+- `GET /api/artifacts/{artifact_id}`
 
 Mock workflow steps:
 - `intake`
@@ -92,3 +95,9 @@ Mock workflow steps:
 - `test_generation`
 - `test_execution`
 - `completed`
+
+Generated artifacts (mocked):
+- `high_level_design`
+- `detailed_design`
+- `code_summary`
+- `test_summary`

@@ -173,10 +173,98 @@ button:disabled {
   color: #a62a31;
 }
 
+.artifact-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 0.9rem;
+}
+
+.artifact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.artifact-tab {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #d0d7e2;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1b2430;
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.artifact-tab-active {
+  border-color: #164fb5;
+  background: #eff5ff;
+}
+
+.artifact-tab:hover {
+  color: #ffffff;
+  background: #164fb5;
+  border-color: #164fb5;
+}
+
+.artifact-tab:hover strong,
+.artifact-tab:hover span,
+.artifact-tab:hover .muted {
+  color: #ffffff;
+}
+
+.artifact-tab:focus,
+.artifact-tab:focus-visible {
+  color: #ffffff;
+  background: #164fb5;
+  border-color: #164fb5;
+  outline: none;
+}
+
+.artifact-tab:focus .muted,
+.artifact-tab:focus-visible .muted {
+  color: #ffffff;
+}
+
+.artifact-tab:focus strong,
+.artifact-tab:focus-visible strong,
+.artifact-tab:focus span,
+.artifact-tab:focus-visible span {
+  color: #ffffff;
+}
+
+.artifact-panel {
+  border: 1px solid #d0d7e2;
+  border-radius: 10px;
+  padding: 0.9rem;
+  background: #fcfdff;
+}
+
+.artifact-panel h4 {
+  margin: 0;
+}
+
+.artifact-content {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
 .ok {
   color: #0d7a3a;
 }
 
 .error {
   color: #b42318;
+}
+
+@media (max-width: 840px) {
+  .artifact-layout {
+    grid-template-columns: 1fr;
+  }
 }
