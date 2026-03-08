@@ -21,6 +21,7 @@ from app.orchestration.mock_workflow_orchestrator import MockWorkflowOrchestrato
 from app.realtime.run_updates_hub import RunUpdatesHub
 from app.services.artifact_service import ArtifactService
 from app.services.generated_file_service import GeneratedFileService
+from app.services.local_test_runner_service import LocalTestRunnerService
 from app.services.project_service import ProjectService
 from app.services.run_workspace_service import RunWorkspaceService
 from app.services.workflow_stages import (
@@ -60,6 +61,9 @@ async def lifespan(app: FastAPI):
         await artifact_repository.ensure_indexes()
         run_updates_hub = RunUpdatesHub()
         workspace_service = RunWorkspaceService(settings.generated_runs_root_dir)
+        test_runner_service = LocalTestRunnerService(
+            timeout_seconds=settings.test_runner_timeout_seconds
+        )
         orchestrator = MockWorkflowOrchestrator(
             workflow_run_repository,
             project_repository,
@@ -69,7 +73,7 @@ async def lifespan(app: FastAPI):
                 DetailedDesignService(),
                 CodeGenerationService(),
                 TestGenerationService(),
-                TestExecutionService(),
+                TestExecutionService(test_runner_service, workspace_service),
             ],
             workspace_service=workspace_service,
             run_update_publisher=run_updates_hub,

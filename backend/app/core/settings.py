@@ -13,6 +13,7 @@ class Settings:
     artifacts_collection: str
     execution_events_collection: str
     mock_workflow_step_delay_seconds: float
+    test_runner_timeout_seconds: float
     generated_runs_root_dir: str
 
 
@@ -52,5 +53,6 @@ def get_settings() -> Settings:
         mock_workflow_step_delay_seconds=_read_float(
             "MOCK_WORKFLOW_STEP_DELAY_SECONDS", 2.5
         ),
+        test_runner_timeout_seconds=_read_float("TEST_RUNNER_TIMEOUT_SECONDS", 60.0),
         generated_runs_root_dir=os.getenv("GENERATED_RUNS_ROOT_DIR", "generated_runs"),
     )

@@ -30,6 +30,9 @@ class RunWorkspaceService:
         run_path.mkdir(parents=True, exist_ok=True)
         return run_path
 
+    def get_run_workspace_path(self, run_id: str) -> Path:
+        return self._run_path(run_id)
+
     def write_files(
         self,
         run_id: str,

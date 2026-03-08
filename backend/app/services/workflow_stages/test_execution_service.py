@@ -1,6 +1,8 @@
 import logging
 from textwrap import dedent
 
+from app.services.local_test_runner_service import LocalTestRunnerService
+from app.services.run_workspace_service import RunWorkspaceService
 from app.services.workflow_stage_models import (
     StageArtifactDraft,
     StageExecutionContext,
@@ -13,6 +15,14 @@ logger = logging.getLogger(__name__)
 class TestExecutionService:
     step_name = "test_execution"
 
+    def __init__(
+        self,
+        test_runner: LocalTestRunnerService,
+        workspace_service: RunWorkspaceService,
+    ) -> None:
+        self._test_runner = test_runner
+        self._workspace_service = workspace_service
+
     async def execute(self, context: StageExecutionContext) -> StageExecutionResult:
         logger.info(
             "Running stage '%s' for run '%s' and project '%s'",
@@ -21,36 +31,72 @@ class TestExecutionService:
             context.project.id,
         )
 
-        artifact = StageArtifactDraft(
+        workspace_path = self._workspace_service.get_run_workspace_path(context.run.id)
+        test_result = await self._test_runner.run_pytest(workspace_path)
+
+        status = "completed" if test_result.status == "passed" else "failed"
+        summary = (
+            f"Pytest passed ({test_result.summary})"
+            if test_result.status == "passed"
+            else f"Pytest failed ({test_result.summary})"
+        )
+
+        summary_artifact = StageArtifactDraft(
             artifact_type="test_summary",
             title="Test Execution Summary",
             content=dedent(
                 f"""
-                # Test Summary
+                # Test Execution Summary
 
                 Project: {context.project.name}
 
-                ## Smoke Checks
-                - API startup and MongoDB connectivity: passed.
-                - Workflow progression from intake to completed: passed.
-                - Artifact generation and retrieval endpoints: passed.
-                - Frontend build with run polling and artifact rendering: passed.
-
-                ## Observations
-                - Polling interval provides near-real-time UI updates without heavy load.
-                - Artifact retrieval remains stable while run is still progressing.
+                ## Outcome
+                - Status: {test_result.status}
+                - Exit code: {test_result.exit_code}
+                - Summary: {test_result.summary}
                 """
             ).strip(),
-            metadata={"mock_source": "test_execution_service"},
+            metadata={
+                "mock_source": "test_execution_service",
+                "exit_code": test_result.exit_code,
+            },
+        )
+
+        result_artifact = StageArtifactDraft(
+            artifact_type="test_result",
+            title="Pytest Raw Output",
+            content=dedent(
+                f"""
+                # Pytest Raw Output
+
+                ## Exit Code
+                {test_result.exit_code}
+
+                ## Summary
+                {test_result.summary}
+
+                ## STDOUT
+                {test_result.stdout or "(empty)"}
+
+                ## STDERR
+                {test_result.stderr or "(empty)"}
+                """
+            ).strip(),
+            metadata={
+                "exit_code": test_result.exit_code,
+                "status": test_result.status,
+            },
         )
 
         return StageExecutionResult(
             step=self.step_name,
-            summary="Generated test execution summary artifact",
+            status=status,
+            summary=summary,
             logs=[
-                "Executed mocked smoke checks across API, orchestration, and UI.",
-                "Recorded verification notes for artifact and run visibility.",
+                f"Pytest exit code: {test_result.exit_code}",
+                f"Pytest summary: {test_result.summary}",
             ],
-            artifacts=[artifact],
-            metadata={"artifact_count": 1, "passed_checks": 4},
+            artifacts=[summary_artifact, result_artifact],
+            test_result=test_result,
+            metadata={"artifact_count": 2, "test_status": test_result.status},
         )

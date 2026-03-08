@@ -16,6 +16,15 @@ export type WorkflowStep = {
   completed_at: string | null;
 };
 
+export type WorkflowTestResult = {
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+  status: "passed" | "failed";
+  summary: string;
+  executed_at: string;
+};
+
 export type WorkflowRun = {
   id: string;
   project_id: string;
@@ -26,4 +35,5 @@ export type WorkflowRun = {
   updated_at: string;
   artifacts: string[];
   execution_event_ids: string[];
+  test_result: WorkflowTestResult | null;
 };

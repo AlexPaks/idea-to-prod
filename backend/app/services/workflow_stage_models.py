@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.models.artifact import ArtifactType
 from app.models.project import Project
-from app.models.workflow_run import WorkflowRun, WorkflowStepName
+from app.models.workflow_run import WorkflowRun, WorkflowStepName, WorkflowTestResult
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,7 @@ class StageExecutionResult(BaseModel):
     logs: list[str] = Field(default_factory=list)
     artifacts: list[StageArtifactDraft] = Field(default_factory=list)
     generated_files: list[StageGeneratedFileDraft] = Field(default_factory=list)
+    test_result: WorkflowTestResult | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
