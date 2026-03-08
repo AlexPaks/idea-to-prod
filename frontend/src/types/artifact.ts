@@ -2,7 +2,8 @@ export type ArtifactType =
   | "high_level_design"
   | "detailed_design"
   | "code_summary"
-  | "test_summary";
+  | "test_summary"
+  | "generated_file";
 
 export type Artifact = {
   id: string;
@@ -12,4 +13,5 @@ export type Artifact = {
   title: string;
   content: string;
   created_at: string;
+  metadata?: Record<string, unknown>;
 };

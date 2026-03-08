@@ -24,12 +24,20 @@ class StageArtifactDraft(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class StageGeneratedFileDraft(BaseModel):
+    relative_path: str
+    content: str
+    language: str | None = None
+    description: str = ""
+
+
 class StageExecutionResult(BaseModel):
     step: WorkflowStepName
     status: Literal["completed", "failed"] = "completed"
     summary: str
     logs: list[str] = Field(default_factory=list)
     artifacts: list[StageArtifactDraft] = Field(default_factory=list)
+    generated_files: list[StageGeneratedFileDraft] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

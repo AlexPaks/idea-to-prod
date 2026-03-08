@@ -6,6 +6,7 @@ from app.repositories.artifact_repository import ArtifactRepository
 from app.repositories.project_repository import ProjectRepository
 from app.repositories.workflow_run_repository import WorkflowRunRepository
 from app.services.errors import EntityNotFoundError
+from app.services.run_workspace_service import RunWorkspaceService
 
 
 class ProjectService:
@@ -14,10 +15,12 @@ class ProjectService:
         repository: ProjectRepository,
         run_repository: WorkflowRunRepository,
         artifact_repository: ArtifactRepository,
+        workspace_service: RunWorkspaceService | None = None,
     ) -> None:
         self._repository = repository
         self._run_repository = run_repository
         self._artifact_repository = artifact_repository
+        self._workspace_service = workspace_service
 
     async def create_project(self, payload: ProjectCreate) -> Project:
         project = Project(
@@ -44,6 +47,8 @@ class ProjectService:
         for run in runs:
             await self._artifact_repository.delete_by_run_id(run.id)
             await self._run_repository.delete(run.id)
+            if self._workspace_service is not None:
+                self._workspace_service.delete_run_workspace(run.id)
 
         await self._repository.delete(project_id)
 

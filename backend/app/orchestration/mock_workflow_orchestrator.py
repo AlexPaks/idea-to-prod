@@ -11,9 +11,11 @@ from app.repositories.artifact_repository import ArtifactRepository
 from app.repositories.errors import RepositoryError
 from app.repositories.project_repository import ProjectRepository
 from app.repositories.workflow_run_repository import WorkflowRunRepository
+from app.services.run_workspace_service import RunWorkspaceService, WorkspaceFileWriteResult
 from app.services.workflow_stage_models import (
     StageArtifactDraft,
     StageExecutionContext,
+    StageGeneratedFileDraft,
     WorkflowStageService,
 )
 
@@ -29,6 +31,7 @@ class MockWorkflowOrchestrator:
         project_repository: ProjectRepository,
         artifact_repository: ArtifactRepository,
         stage_services: list[WorkflowStageService],
+        workspace_service: RunWorkspaceService | None = None,
         run_update_publisher: RunUpdatePublisher | None = None,
         step_delay_seconds: float = 2.5,
     ) -> None:
@@ -38,6 +41,7 @@ class MockWorkflowOrchestrator:
         self._stage_services = {
             service.step_name: service for service in stage_services
         }
+        self._workspace_service = workspace_service
         self._run_update_publisher = run_update_publisher
         self._step_delay_seconds = step_delay_seconds
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -142,6 +146,18 @@ class MockWorkflowOrchestrator:
             created = await self._artifact_repository.create(artifact)
             run.artifacts.append(created.id)
 
+        if result.generated_files and self._workspace_service is not None:
+            write_results = self._workspace_service.write_files(run.id, result.generated_files)
+            for generated_file, write_result in zip(result.generated_files, write_results):
+                file_artifact = _build_generated_file_artifact(
+                    run,
+                    project,
+                    generated_file,
+                    write_result,
+                )
+                created = await self._artifact_repository.create(file_artifact)
+                run.artifacts.append(created.id)
+
         logger.info(
             "Completed stage '%s' for run '%s' with status '%s' (%s)",
             completed_step,
@@ -173,6 +189,30 @@ def _build_artifact(
         title=artifact.title,
         content=artifact.content,
         created_at=datetime.now(timezone.utc),
+    )
+
+
+def _build_generated_file_artifact(
+    run: WorkflowRun,
+    project: Project,
+    generated_file: StageGeneratedFileDraft,
+    write_result: WorkspaceFileWriteResult,
+) -> Artifact:
+    return Artifact(
+        id=str(uuid4()),
+        run_id=run.id,
+        project_id=project.id,
+        artifact_type="generated_file",
+        title=write_result.relative_path,
+        content=generated_file.description or f"Generated file: {write_result.relative_path}",
+        created_at=write_result.updated_at,
+        metadata={
+            "path": write_result.relative_path,
+            "size_bytes": write_result.size_bytes,
+            "language": write_result.language,
+            "updated_at": write_result.updated_at.isoformat(),
+            "workspace_run_id": run.id,
+        },
     )
 
 

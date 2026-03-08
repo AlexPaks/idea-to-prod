@@ -1,6 +1,11 @@
 import logging
+from textwrap import dedent
 
-from app.services.workflow_stage_models import StageExecutionContext, StageExecutionResult
+from app.services.workflow_stage_models import (
+    StageExecutionContext,
+    StageExecutionResult,
+    StageGeneratedFileDraft,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,5 +29,22 @@ class TestGenerationService:
                 "Prepared smoke and regression test sets for execution stage.",
             ],
             artifacts=[],
-            metadata={"artifact_count": 0, "planned_cases": 6},
+            generated_files=[
+                StageGeneratedFileDraft(
+                    relative_path="tests/test_basic.py",
+                    language="python",
+                    description="Generated smoke test placeholder",
+                    content=dedent(
+                        """
+                        def test_sanity() -> None:
+                            assert True
+                        """
+                    ).strip(),
+                )
+            ],
+            metadata={
+                "artifact_count": 0,
+                "planned_cases": 6,
+                "generated_file_count": 1,
+            },
         )

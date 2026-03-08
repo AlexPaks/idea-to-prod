@@ -5,6 +5,7 @@ from app.services.workflow_stage_models import (
     StageArtifactDraft,
     StageExecutionContext,
     StageExecutionResult,
+    StageGeneratedFileDraft,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,5 +54,40 @@ class CodeGenerationService:
                 "Captured architectural decisions that preserve adapter flexibility.",
             ],
             artifacts=[artifact],
-            metadata={"artifact_count": 1},
+            generated_files=[
+                StageGeneratedFileDraft(
+                    relative_path="frontend/src/App.tsx",
+                    language="typescript",
+                    description="Generated frontend entry page",
+                    content=dedent(
+                        f"""
+                        export default function App() {{
+                          return (
+                            <main>
+                              <h1>{context.project.name}</h1>
+                              <p>{context.project.idea}</p>
+                            </main>
+                          );
+                        }}
+                        """
+                    ).strip(),
+                ),
+                StageGeneratedFileDraft(
+                    relative_path="backend/main.py",
+                    language="python",
+                    description="Generated backend startup placeholder",
+                    content=dedent(
+                        f"""
+                        from fastapi import FastAPI
+
+                        app = FastAPI(title="{context.project.name} API")
+
+                        @app.get("/health")
+                        async def health() -> dict[str, str]:
+                            return {{"status": "ok", "project": "{context.project.name}"}}
+                        """
+                    ).strip(),
+                ),
+            ],
+            metadata={"artifact_count": 1, "generated_file_count": 2},
         )

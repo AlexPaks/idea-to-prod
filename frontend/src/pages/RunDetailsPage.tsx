@@ -2,9 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { artifactsApi } from "../api/artifacts";
+import { generatedFilesApi } from "../api/generatedFiles";
 import { createRunUpdatesSocket, isRunUpdatedMessage } from "../api/runUpdates";
 import { runsApi } from "../api/runs";
 import type { Artifact } from "../types/artifact";
+import type {
+  GeneratedFileContent,
+  GeneratedFileMetadata,
+} from "../types/generatedFile";
 import type { WorkflowRun, WorkflowStepStatus } from "../types/workflowRun";
 
 const POLL_INTERVAL_MS = 2500;
@@ -16,12 +21,19 @@ export function RunDetailsPage() {
   const { runId } = useParams<{ runId: string }>();
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [generatedFiles, setGeneratedFiles] = useState<GeneratedFileMetadata[]>([]);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [selectedFileContent, setSelectedFileContent] = useState<GeneratedFileContent | null>(
+    null
+  );
+  const [isFileLoading, setIsFileLoading] = useState(false);
+  const [fileError, setFileError] = useState("");
   const [liveConnectionState, setLiveConnectionState] = useState<LiveConnectionState>("connecting");
   const [isLoading, setIsLoading] = useState(true);
   const [isDeletingRun, setIsDeletingRun] = useState(false);
   const [error, setError] = useState("");
-  const artifactCountRef = useRef(0);
+  const trackedArtifactsCountRef = useRef(0);
 
   const selectedArtifact = useMemo(
     () => artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? null,
@@ -29,8 +41,8 @@ export function RunDetailsPage() {
   );
 
   useEffect(() => {
-    artifactCountRef.current = artifacts.length;
-  }, [artifacts.length]);
+    trackedArtifactsCountRef.current = run?.artifacts.length ?? 0;
+  }, [run?.artifacts.length]);
 
   useEffect(() => {
     if (!runId) {
@@ -41,11 +53,38 @@ export function RunDetailsPage() {
 
     let isMounted = true;
 
+    const applyArtifacts = (artifactData: Artifact[]) => {
+      setArtifacts(artifactData);
+      setSelectedArtifactId((current) => {
+        if (artifactData.length === 0) {
+          return null;
+        }
+        if (current && artifactData.some((artifact) => artifact.id === current)) {
+          return current;
+        }
+        return artifactData[0].id;
+      });
+    };
+
+    const applyGeneratedFiles = (files: GeneratedFileMetadata[]) => {
+      setGeneratedFiles(files);
+      setSelectedFilePath((current) => {
+        if (files.length === 0) {
+          return null;
+        }
+        if (current && files.some((item) => item.path === current)) {
+          return current;
+        }
+        return files[0].path;
+      });
+    };
+
     const loadRunData = async () => {
       try {
-        const [runData, artifactData] = await Promise.all([
+        const [runData, artifactData, generatedFileData] = await Promise.all([
           runsApi.getById(runId),
           artifactsApi.listByRunId(runId),
+          generatedFilesApi.listByRunId(runId),
         ]);
 
         if (!isMounted) {
@@ -54,7 +93,7 @@ export function RunDetailsPage() {
 
         setRun(runData);
         applyArtifacts(artifactData);
-
+        applyGeneratedFiles(generatedFileData);
         setError("");
         setIsLoading(false);
       } catch (err) {
@@ -64,21 +103,6 @@ export function RunDetailsPage() {
           setIsLoading(false);
         }
       }
-    };
-
-    const applyArtifacts = (artifactData: Artifact[]) => {
-      setArtifacts(artifactData);
-      setSelectedArtifactId((current) => {
-        if (artifactData.length === 0) {
-          return null;
-        }
-
-        if (current && artifactData.some((artifact) => artifact.id === current)) {
-          return current;
-        }
-
-        return artifactData[0].id;
-      });
     };
 
     void loadRunData();
@@ -102,29 +126,38 @@ export function RunDetailsPage() {
     let reconnectTimer: number | undefined;
     let socket: WebSocket | null = null;
 
-    const applyArtifacts = (artifactData: Artifact[]) => {
-      setArtifacts(artifactData);
-      setSelectedArtifactId((current) => {
-        if (artifactData.length === 0) {
-          return null;
-        }
-
-        if (current && artifactData.some((artifact) => artifact.id === current)) {
-          return current;
-        }
-
-        return artifactData[0].id;
-      });
-    };
-
-    const refreshArtifacts = async () => {
+    const refreshRunAssets = async () => {
       try {
-        const artifactData = await artifactsApi.listByRunId(runId);
+        const [artifactData, generatedFileData] = await Promise.all([
+          artifactsApi.listByRunId(runId),
+          generatedFilesApi.listByRunId(runId),
+        ]);
+
         if (!isClosed) {
-          applyArtifacts(artifactData);
+          setArtifacts(artifactData);
+          setSelectedArtifactId((current) => {
+            if (artifactData.length === 0) {
+              return null;
+            }
+            if (current && artifactData.some((item) => item.id === current)) {
+              return current;
+            }
+            return artifactData[0].id;
+          });
+
+          setGeneratedFiles(generatedFileData);
+          setSelectedFilePath((current) => {
+            if (generatedFileData.length === 0) {
+              return null;
+            }
+            if (current && generatedFileData.some((item) => item.path === current)) {
+              return current;
+            }
+            return generatedFileData[0].path;
+          });
         }
       } catch {
-        // Polling still runs as a fallback. Swallow transient websocket-sync failures.
+        // Polling remains active and will reconcile state shortly.
       }
     };
 
@@ -156,11 +189,11 @@ export function RunDetailsPage() {
           setRun(parsed.run);
           setError("");
 
-          if (parsed.run.artifacts.length !== artifactCountRef.current) {
-            void refreshArtifacts();
+          if (parsed.run.artifacts.length !== trackedArtifactsCountRef.current) {
+            void refreshRunAssets();
           }
         } catch {
-          // Ignore malformed websocket messages and keep polling fallback active.
+          // Ignore malformed payloads.
         }
       };
 
@@ -192,6 +225,43 @@ export function RunDetailsPage() {
       }
     };
   }, [runId]);
+
+  useEffect(() => {
+    if (!runId || !selectedFilePath) {
+      setSelectedFileContent(null);
+      setFileError("");
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadFileContent = async () => {
+      setIsFileLoading(true);
+      setFileError("");
+      try {
+        const content = await generatedFilesApi.getContent(runId, selectedFilePath);
+        if (isMounted) {
+          setSelectedFileContent(content);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        if (isMounted) {
+          setFileError(message);
+          setSelectedFileContent(null);
+        }
+      } finally {
+        if (isMounted) {
+          setIsFileLoading(false);
+        }
+      }
+    };
+
+    void loadFileContent();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [runId, selectedFilePath]);
 
   if (isLoading) {
     return <p>Loading run details...</p>;
@@ -328,6 +398,50 @@ export function RunDetailsPage() {
           </div>
         )}
       </section>
+
+      <section className="stack">
+        <h3>Generated Files</h3>
+        {generatedFiles.length === 0 ? (
+          <p className="muted">No generated files available yet.</p>
+        ) : (
+          <div className="generated-files-layout">
+            <div className="generated-file-list">
+              {generatedFiles.map((file) => (
+                <button
+                  key={file.artifact_id}
+                  type="button"
+                  className={`generated-file-item${
+                    file.path === selectedFilePath ? " generated-file-item-active" : ""
+                  }`}
+                  onClick={() => setSelectedFilePath(file.path)}
+                >
+                  <strong>{file.path}</strong>
+                  <span className="muted">
+                    {formatBytes(file.size_bytes)} | {new Date(file.updated_at).toLocaleString()}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="generated-file-panel">
+              {isFileLoading ? (
+                <p>Loading file...</p>
+              ) : fileError ? (
+                <p className="error">Failed to load file: {fileError}</p>
+              ) : selectedFileContent ? (
+                <div className="stack">
+                  <div className="row">
+                    <h4>{selectedFileContent.path}</h4>
+                    <span className="muted">{selectedFileContent.language ?? "plain text"}</span>
+                  </div>
+                  <pre className="code-viewer">{selectedFileContent.content}</pre>
+                </div>
+              ) : (
+                <p className="muted">Select a generated file to view content.</p>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
     </section>
   );
 }
@@ -337,6 +451,14 @@ function formatDate(value: string | null): string {
     return "-";
   }
   return new Date(value).toLocaleString();
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  const kb = value / 1024;
+  return `${kb.toFixed(1)} KB`;
 }
 
 function labelForStatus(status: WorkflowStepStatus): string {
