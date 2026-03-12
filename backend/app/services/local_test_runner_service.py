@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,32 +24,24 @@ class LocalTestRunnerService:
         self._timeout_seconds = timeout_seconds
 
     async def run_pytest(self, workspace_path: Path) -> WorkflowTestResult:
-        process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            cwd=str(workspace_path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
-        )
-
-        timed_out = False
         try:
-            raw_stdout, raw_stderr = await asyncio.wait_for(
-                process.communicate(),
+            completed = await asyncio.to_thread(
+                subprocess.run,
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-q",
+                ],
+                cwd=str(workspace_path),
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
                 timeout=self._timeout_seconds,
             )
-        except asyncio.TimeoutError:
-            timed_out = True
-            process.kill()
-            raw_stdout, raw_stderr = await process.communicate()
-
-        stdout = raw_stdout.decode("utf-8", errors="replace")
-        stderr = raw_stderr.decode("utf-8", errors="replace")
-
-        if timed_out:
+        except subprocess.TimeoutExpired as error:
+            stdout = _ensure_text(error.stdout)
+            stderr = _ensure_text(error.stderr)
             return WorkflowTestResult(
                 exit_code=-1,
                 stdout=stdout,
@@ -58,7 +51,9 @@ class LocalTestRunnerService:
                 executed_at=datetime.now(timezone.utc),
             )
 
-        exit_code = process.returncode if process.returncode is not None else 1
+        stdout = _ensure_text(completed.stdout)
+        stderr = _ensure_text(completed.stderr)
+        exit_code = completed.returncode if completed.returncode is not None else 1
         status = "passed" if exit_code == 0 else "failed"
         summary = _extract_summary(stdout, stderr, exit_code)
 
@@ -84,3 +79,11 @@ def _extract_summary(stdout: str, stderr: str, exit_code: int) -> str:
             return parsed.group(0).strip()
 
     return "Tests passed" if exit_code == 0 else "Tests failed"
+
+
+def _ensure_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return value.decode("utf-8", errors="replace")

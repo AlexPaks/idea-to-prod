@@ -85,6 +85,20 @@ class WorkflowRunService:
         if self._workspace_service is not None:
             self._workspace_service.delete_run_workspace(run_id)
 
+    async def resume_incomplete_runs(self) -> int:
+        resumed = 0
+        projects = await self._project_repository.list()
+        for project in projects:
+            runs = await self._run_repository.list_by_project_id(project.id)
+            for run in runs:
+                if run.status in {"running", "queued"}:
+                    self._orchestrator.schedule_run(run.id)
+                    resumed += 1
+
+        if resumed:
+            logger.info("Rescheduled %s incomplete workflow run(s) on startup", resumed)
+        return resumed
+
     async def _publish_run_update(self, run: WorkflowRun) -> None:
         if self._run_update_publisher is None:
             return
