@@ -109,6 +109,11 @@ a:hover {
   font: inherit;
 }
 
+.form input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+}
+
 .button,
 button {
   align-self: flex-start;
