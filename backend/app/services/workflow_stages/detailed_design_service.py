@@ -33,6 +33,12 @@ class DetailedDesignService:
             context.project.id,
         )
 
+        design_source = "llm"
+        logs = [
+            "Rendered detailed design prompt template.",
+            "Generated implementation-level technical plan with LLM.",
+        ]
+
         try:
             prompt = self._prompt_loader.render(
                 "detailed_design.md",
@@ -42,6 +48,33 @@ class DetailedDesignService:
                 },
             )
             design_content = await to_thread(self._llm_client.generate, prompt)
+        except LLMConfigurationError as exc:
+            logger.warning(
+                "LLM configuration unavailable for detailed design on run '%s': %s",
+                context.run.id,
+                exc,
+            )
+            design_content = (
+                f"# Detailed Technical Design\n\n"
+                f"Project: {context.project.name}\n\n"
+                "## API Boundaries\n"
+                "- `/api/projects` for project creation and retrieval.\n"
+                "- `/api/projects/{project_id}/runs` for run orchestration start/listing.\n"
+                "- `/api/runs/{run_id}/artifacts` for run-scoped output retrieval.\n\n"
+                "## Data Contracts\n"
+                "- Project document stores core business intent and metadata.\n"
+                "- WorkflowRun document tracks progression, current step, and artifact IDs.\n"
+                "- Artifact document stores output payloads for design/code/test stages.\n\n"
+                "## Execution Strategy\n"
+                "- Background orchestrator advances one step at a fixed delay.\n"
+                "- Step completion triggers deterministic mocked artifact generation.\n"
+                "- Run details page polls for status and artifacts.\n"
+            )
+            design_source = "fallback_mock"
+            logs = [
+                "LLM configuration unavailable; used fallback detailed design.",
+                str(exc),
+            ]
         except LLMRateLimitError as exc:
             logger.warning(
                 "Rate-limited while generating detailed design for run '%s': %s",
@@ -68,7 +101,7 @@ class DetailedDesignService:
                 logs=[str(exc)],
                 metadata={"error_type": "network"},
             )
-        except (LLMInvalidResponseError, LLMConfigurationError, FileNotFoundError, KeyError) as exc:
+        except (LLMInvalidResponseError, FileNotFoundError, KeyError) as exc:
             logger.error(
                 "Invalid detailed design generation for run '%s'",
                 context.run.id,
@@ -98,16 +131,13 @@ class DetailedDesignService:
             artifact_type="detailed_design",
             title="Detailed Technical Design",
             content=design_content.strip(),
-            metadata={"source": "llm", "stage": self.step_name},
+            metadata={"source": design_source, "stage": self.step_name},
         )
 
         return StageExecutionResult(
             step=self.step_name,
             summary="Generated detailed technical design artifact",
-            logs=[
-                "Rendered detailed design prompt template.",
-                "Generated implementation-level technical plan with LLM.",
-            ],
+            logs=logs,
             artifacts=[artifact],
             metadata={"artifact_count": 1},
         )

@@ -114,6 +114,7 @@ async def lifespan(app: FastAPI):
             run_repository=workflow_run_repository,
             workspace_service=workspace_service,
         )
+        await app.state.workflow_run_service.resume_incomplete_runs()
         app.state.orchestrator = orchestrator
         app.state.settings = settings
         logger.info("Backend startup complete")

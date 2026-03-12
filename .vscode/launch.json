@@ -15,6 +15,7 @@
         "8000"
       ],
       "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/backend/.env",
       "justMyCode": true
     },
     {

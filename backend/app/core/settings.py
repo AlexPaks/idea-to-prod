@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,31 @@ class Settings:
     gemini_api_key: str
 
 
+def _load_backend_env_file() -> None:
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    if not env_path.exists() or not env_path.is_file():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+
+        if (
+            (value.startswith('"') and value.endswith('"'))
+            or (value.startswith("'") and value.endswith("'"))
+        ) and len(value) >= 2:
+            value = value[1:-1]
+
+        os.environ.setdefault(key, value)
+
+
 def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
@@ -37,6 +63,7 @@ def _read_float(name: str, default: float) -> float:
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    _load_backend_env_file()
     frontend_origins = _split_csv(
         os.getenv("FRONTEND_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
     )

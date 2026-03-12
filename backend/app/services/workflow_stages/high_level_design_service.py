@@ -35,6 +35,12 @@ class HighLevelDesignService:
             context.project.id,
         )
 
+        design_source = "llm"
+        logs = [
+            "Rendered high-level design prompt template.",
+            "Generated high-level architecture with LLM.",
+        ]
+
         try:
             prompt = self._prompt_loader.render(
                 "hl_design.md",
@@ -44,6 +50,38 @@ class HighLevelDesignService:
                 },
             )
             design_content = await to_thread(self._llm_client.generate, prompt)
+        except LLMConfigurationError as exc:
+            logger.warning(
+                "LLM configuration unavailable for high-level design on run '%s': %s",
+                context.run.id,
+                exc,
+            )
+            design_content = dedent(
+                f"""
+                # High-Level Design
+
+                Product: {context.project.name}
+
+                ## Objective
+                Deliver an end-to-end experience for the idea: "{context.project.idea}".
+
+                ## Core Components
+                - Frontend SPA for user interactions and orchestration visibility.
+                - Backend API for project, workflow, and artifact lifecycle.
+                - MongoDB persistence for projects, runs, and generated outputs.
+
+                ## Main Flow
+                1. User creates a project.
+                2. User starts generation run.
+                3. Workflow advances through design/code/test stages.
+                4. Generated artifacts are attached to the run and rendered in UI.
+                """
+            ).strip()
+            design_source = "fallback_mock"
+            logs = [
+                "LLM configuration unavailable; used fallback high-level design.",
+                str(exc),
+            ]
         except LLMRateLimitError as exc:
             logger.warning(
                 "Rate-limited while generating high-level design for run '%s': %s",
@@ -70,7 +108,7 @@ class HighLevelDesignService:
                 logs=[str(exc)],
                 metadata={"error_type": "network"},
             )
-        except (LLMInvalidResponseError, LLMConfigurationError, FileNotFoundError, KeyError) as exc:
+        except (LLMInvalidResponseError, FileNotFoundError, KeyError) as exc:
             logger.error(
                 "Invalid high-level design generation for run '%s'",
                 context.run.id,
@@ -100,16 +138,13 @@ class HighLevelDesignService:
             artifact_type="high_level_design",
             title="High-Level Design",
             content=design_content.strip(),
-            metadata={"source": "llm", "stage": self.step_name},
+            metadata={"source": design_source, "stage": self.step_name},
         )
 
         return StageExecutionResult(
             step=self.step_name,
             summary="Generated high-level design artifact",
-            logs=[
-                "Rendered high-level design prompt template.",
-                "Generated high-level architecture with LLM.",
-            ],
+            logs=logs,
             artifacts=[artifact],
             generated_files=[
                 StageGeneratedFileDraft(

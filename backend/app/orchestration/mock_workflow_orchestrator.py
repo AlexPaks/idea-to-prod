@@ -84,7 +84,18 @@ class MockWorkflowOrchestrator:
 
                 next_run, completed_step = _advance_run(run)
                 if completed_step is not None:
-                    stage_result = await self._execute_stage(next_run, completed_step)
+                    try:
+                        stage_result = await self._execute_stage(next_run, completed_step)
+                    except Exception:
+                        logger.exception(
+                            "Stage execution crashed for run '%s' at step '%s'",
+                            run_id,
+                            completed_step,
+                        )
+                        _mark_run_failed(next_run, completed_step)
+                        updated_run = await self._run_repository.update(next_run)
+                        await self._publish_run_update(updated_run)
+                        return
                     if stage_result is not None and stage_result.test_result is not None:
                         next_run.test_result = stage_result.test_result
                     if stage_result is not None and stage_result.status == "failed":
