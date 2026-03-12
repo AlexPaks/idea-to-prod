@@ -15,6 +15,9 @@ class CollectionRegistry:
     workflow_runs: str
     artifacts: str
     execution_events: str
+    google_drive_connections: str
+    github_connections: str
+    jira_connections: str
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,9 @@ def _build_collections(settings: Settings) -> CollectionRegistry:
         workflow_runs=settings.workflow_runs_collection,
         artifacts=settings.artifacts_collection,
         execution_events=settings.execution_events_collection,
+        google_drive_connections=settings.google_drive_connections_collection,
+        github_connections=settings.github_connections_collection,
+        jira_connections=settings.jira_connections_collection,
     )
 
 

@@ -17,7 +17,7 @@ import type {
 
 const POLL_INTERVAL_MS = 2500;
 const WS_RECONNECT_DELAY_MS = 3000;
-type LiveConnectionState = "connecting" | "connected" | "disconnected";
+type LiveConnectionState = "connecting" | "connected" | "disconnected" | "inactive";
 
 export function RunDetailsPage() {
   const navigate = useNavigate();
@@ -124,8 +124,13 @@ export function RunDetailsPage() {
       setLiveConnectionState("disconnected");
       return;
     }
+    if (!isRunLiveUpdatable(run?.status)) {
+      setLiveConnectionState(run ? "inactive" : "connecting");
+      return;
+    }
 
     let isClosed = false;
+    let shouldReconnect = true;
     let reconnectTimer: number | undefined;
     let socket: WebSocket | null = null;
 
@@ -192,6 +197,15 @@ export function RunDetailsPage() {
           setRun(parsed.run);
           setError("");
 
+          if (!isRunLiveUpdatable(parsed.run.status)) {
+            shouldReconnect = false;
+            setLiveConnectionState("inactive");
+            if (socket && socket.readyState <= WebSocket.OPEN) {
+              socket.close();
+            }
+            return;
+          }
+
           if (parsed.run.artifacts.length !== trackedArtifactsCountRef.current) {
             void refreshRunAssets();
           }
@@ -210,6 +224,10 @@ export function RunDetailsPage() {
         if (isClosed) {
           return;
         }
+        if (!shouldReconnect) {
+          setLiveConnectionState("inactive");
+          return;
+        }
 
         setLiveConnectionState("disconnected");
         reconnectTimer = window.setTimeout(connect, WS_RECONNECT_DELAY_MS);
@@ -220,6 +238,7 @@ export function RunDetailsPage() {
 
     return () => {
       isClosed = true;
+      shouldReconnect = false;
       if (reconnectTimer !== undefined) {
         window.clearTimeout(reconnectTimer);
       }
@@ -227,7 +246,7 @@ export function RunDetailsPage() {
         socket.close();
       }
     };
-  }, [runId]);
+  }, [runId, run?.status]);
 
   useEffect(() => {
     if (!runId || !selectedFilePath) {
@@ -267,15 +286,21 @@ export function RunDetailsPage() {
   }, [runId, selectedFilePath]);
 
   if (isLoading) {
-    return <p>Loading run details...</p>;
+    return <p className="p-8 text-slate-600">Loading run details...</p>;
   }
 
   if (error) {
-    return <p className="error">Failed to load run: {error}</p>;
+    return (
+      <div className="p-8">
+        <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          Failed to load run: {error}
+        </p>
+      </div>
+    );
   }
 
   if (!run) {
-    return <p className="muted">Run not found.</p>;
+    return <p className="p-8 text-slate-600">Run not found.</p>;
   }
 
   const onDeleteRun = async () => {
@@ -291,7 +316,7 @@ export function RunDetailsPage() {
 
     try {
       await runsApi.deleteById(run.id);
-      navigate(`/projects/${run.project_id}`);
+      navigate("/");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setError(message);
@@ -300,188 +325,276 @@ export function RunDetailsPage() {
   };
 
   return (
-    <section className="stack">
-      <div className="row">
-        <h2>Run Details</h2>
-        <div className="row-actions">
-          <Link to={`/projects/${run.project_id}`}>Back to project</Link>
-          <button
-            type="button"
-            className="button button-danger"
-            disabled={isDeletingRun}
-            onClick={onDeleteRun}
-          >
-            {isDeletingRun ? "Deleting..." : "Delete Run"}
-          </button>
-        </div>
-      </div>
-
-      <div className="card stack">
-        <p>
-          <strong>Run ID:</strong> {run.id}
-        </p>
-        <p>
-          <strong>Project ID:</strong> {run.project_id}
-        </p>
-        <p>
-          <strong>Overall Status:</strong> {run.status}
-        </p>
-        <p>
-          <strong>Current Step:</strong> {run.current_step ?? "-"}
-        </p>
-        <p>
-          <strong>Updated:</strong> {new Date(run.updated_at).toLocaleString()}
-        </p>
-        <p>
-          <strong>Live Updates:</strong>{" "}
-          <span className={liveConnectionState === "connected" ? "ok" : "muted"}>
-            {liveConnectionState === "connected"
-              ? "connected"
-              : `${liveConnectionState} (polling fallback active)`}
-          </span>
-        </p>
-      </div>
-
-      <section className="stack">
-        <h3>Step Timeline</h3>
-        <ul className="timeline">
-          {run.steps.map((step) => (
-            <li key={step.name} className="timeline-item">
-              <span className={`step-badge step-${step.status}`}>{labelForStatus(step.status)}</span>
-              <div className="stack">
-                <p>
-                  <strong>{step.name}</strong>
-                </p>
-                <p className="muted">
-                  Started: {formatDate(step.started_at)} | Completed: {formatDate(step.completed_at)}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="stack">
-        <h3>Test Results</h3>
-        {run.test_result ? (
-          <div className="card stack">
-            <div className="row">
-              <span
-                className={`step-badge ${
-                  run.test_result.status === "passed" ? "step-completed" : "step-failed"
-                }`}
-              >
-                {run.test_result.status}
-              </span>
-              <span className="muted">
-                {new Date(run.test_result.executed_at).toLocaleString()}
-              </span>
-            </div>
-            <p>
-              <strong>Summary:</strong> {run.test_result.summary}
+    <main className="min-h-screen bg-slate-100 px-6 py-8">
+      <section className="mx-auto max-w-[1500px] space-y-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+              Workflow Run
             </p>
-            <p>
-              <strong>Exit Code:</strong> {run.test_result.exit_code}
-            </p>
-            <details>
-              <summary>stdout</summary>
-              <pre className="code-viewer">{run.test_result.stdout || "(empty)"}</pre>
-            </details>
-            <details>
-              <summary>stderr</summary>
-              <pre className="code-viewer">{run.test_result.stderr || "(empty)"}</pre>
-            </details>
+            <h1 className="mt-1 text-2xl font-bold text-slate-950">Run Details</h1>
           </div>
-        ) : (
-          <p className="muted">No real test results recorded yet.</p>
-        )}
-      </section>
+          <div className="flex items-center gap-2">
+            <Link
+              to="/"
+              className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
+            >
+              Back to Dashboard
+            </Link>
+            <Link
+              to="/settings/integrations"
+              className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
+            >
+              Integration Settings
+            </Link>
+          </div>
+        </div>
 
-      <section className="stack">
-        <h3>Artifacts</h3>
-        {artifacts.length === 0 ? (
-          <p className="muted">No artifacts generated yet.</p>
-        ) : (
-          <div className="artifact-layout">
-            <div className="artifact-list">
-              {artifacts.map((artifact) => (
-                <button
-                  key={artifact.id}
-                  type="button"
-                  className={`artifact-tab${artifact.id === selectedArtifactId ? " artifact-tab-active" : ""}`}
-                  onClick={() => setSelectedArtifactId(artifact.id)}
-                >
-                  <strong>{artifact.title}</strong>
-                  <span className="muted">{prettifyArtifactType(artifact.artifact_type)}</span>
-                </button>
-              ))}
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="space-y-2">
+              <p className="text-sm text-slate-600">
+                <span className="font-semibold text-slate-900">Run ID:</span> {run.id}
+              </p>
+              <p className="text-sm text-slate-600">
+                <span className="font-semibold text-slate-900">Project ID:</span> {run.project_id}
+              </p>
+              <p className="text-sm text-slate-600">
+                <span className="font-semibold text-slate-900">Current Step:</span>{" "}
+                {run.current_step ?? "-"}
+              </p>
+              <p className="text-sm text-slate-600">
+                <span className="font-semibold text-slate-900">Updated:</span>{" "}
+                {new Date(run.updated_at).toLocaleString()}
+              </p>
             </div>
-            <div className="artifact-panel">
-              {selectedArtifact ? (
-                <div className="stack">
-                  <div className="row">
-                    <h4>{selectedArtifact.title}</h4>
-                    <span className="muted">
-                      {new Date(selectedArtifact.created_at).toLocaleString()}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
+                  Status
+                </span>
+                <span className={statusPillClass(run.status)}>{run.status}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">
+                  Live Updates
+                </span>
+                <span className={liveStatusPillClass(liveConnectionState)}>
+                  {liveConnectionState === "connected" && "connected"}
+                  {liveConnectionState === "inactive" && "inactive (run finished)"}
+                  {liveConnectionState === "connecting" && "connecting"}
+                  {liveConnectionState === "disconnected" && "disconnected"}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-rose-300"
+                disabled={isDeletingRun}
+                onClick={onDeleteRun}
+              >
+                {isDeletingRun ? "Deleting..." : "Delete Run"}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+          <div className="xl:col-span-7">
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+              <h2 className="text-sm font-semibold text-slate-900">Step Timeline</h2>
+              <ul className="mt-4 space-y-3">
+                {run.steps.map((step) => (
+                  <li
+                    key={step.name}
+                    className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold capitalize text-slate-900">
+                        {step.name.split("_").join(" ")}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Started: {formatDate(step.started_at)} | Completed:{" "}
+                        {formatDate(step.completed_at)}
+                      </p>
+                    </div>
+                    <span className={stepStatusPillClass(step.status)}>
+                      {labelForStatus(step.status)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </div>
+          <div className="xl:col-span-5">
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+              <h2 className="text-sm font-semibold text-slate-900">Test Results</h2>
+              {run.test_result ? (
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span
+                      className={
+                        run.test_result.status === "passed"
+                          ? "rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700"
+                          : "rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700"
+                      }
+                    >
+                      {run.test_result.status}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {new Date(run.test_result.executed_at).toLocaleString()}
                     </span>
                   </div>
-                  <p className="muted">
-                    Type: {prettifyArtifactType(selectedArtifact.artifact_type)}
+                  <p className="text-sm text-slate-700">
+                    <span className="font-semibold text-slate-900">Summary:</span>{" "}
+                    {run.test_result.summary}
                   </p>
-                  <pre className="artifact-content">{selectedArtifact.content}</pre>
+                  <p className="text-sm text-slate-700">
+                    <span className="font-semibold text-slate-900">Exit Code:</span>{" "}
+                    {run.test_result.exit_code}
+                  </p>
+                  <details className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+                      stdout
+                    </summary>
+                    <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-xs text-slate-700">
+                      {run.test_result.stdout || "(empty)"}
+                    </pre>
+                  </details>
+                  <details className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+                      stderr
+                    </summary>
+                    <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-xs text-slate-700">
+                      {run.test_result.stderr || "(empty)"}
+                    </pre>
+                  </details>
                 </div>
               ) : (
-                <p className="muted">Select an artifact to view details.</p>
+                <p className="mt-4 text-sm text-slate-500">No test results recorded yet.</p>
               )}
-            </div>
+            </section>
           </div>
-        )}
-      </section>
+        </section>
 
-      <section className="stack">
-        <h3>Generated Files</h3>
-        {generatedFiles.length === 0 ? (
-          <p className="muted">No generated files available yet.</p>
-        ) : (
-          <div className="generated-files-layout">
-            <div className="generated-file-list">
-              {generatedFiles.map((file) => (
-                <button
-                  key={file.artifact_id}
-                  type="button"
-                  className={`generated-file-item${
-                    file.path === selectedFilePath ? " generated-file-item-active" : ""
-                  }`}
-                  onClick={() => setSelectedFilePath(file.path)}
-                >
-                  <strong>{file.path}</strong>
-                  <span className="muted">
-                    {formatBytes(file.size_bytes)} | {new Date(file.updated_at).toLocaleString()}
-                  </span>
-                </button>
-              ))}
-            </div>
-            <div className="generated-file-panel">
-              {isFileLoading ? (
-                <p>Loading file...</p>
-              ) : fileError ? (
-                <p className="error">Failed to load file: {fileError}</p>
-              ) : selectedFileContent ? (
-                <div className="stack">
-                  <div className="row">
-                    <h4>{selectedFileContent.path}</h4>
-                    <span className="muted">{selectedFileContent.language ?? "plain text"}</span>
-                  </div>
-                  <pre className="code-viewer">{selectedFileContent.content}</pre>
-                </div>
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+          <div className="xl:col-span-6">
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+              <h2 className="text-sm font-semibold text-slate-900">Artifacts</h2>
+              {artifacts.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">No artifacts generated yet.</p>
               ) : (
-                <p className="muted">Select a generated file to view content.</p>
+                <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-12">
+                  <div className="space-y-2 lg:col-span-5">
+                    {artifacts.map((artifact) => (
+                      <button
+                        key={artifact.id}
+                        type="button"
+                        className={`w-full rounded-xl border px-3 py-2 text-left transition ${
+                          artifact.id === selectedArtifactId
+                            ? "border-slate-900 bg-slate-900 text-white"
+                            : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300"
+                        }`}
+                        onClick={() => setSelectedArtifactId(artifact.id)}
+                      >
+                        <p className="text-sm font-semibold">{artifact.title}</p>
+                        <p
+                          className={`mt-1 text-xs ${
+                            artifact.id === selectedArtifactId ? "text-slate-300" : "text-slate-500"
+                          }`}
+                        >
+                          {prettifyArtifactType(artifact.artifact_type)}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 lg:col-span-7">
+                    {selectedArtifact ? (
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="text-sm font-semibold text-slate-900">
+                            {selectedArtifact.title}
+                          </h3>
+                          <span className="text-xs text-slate-500">
+                            {new Date(selectedArtifact.created_at).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500">
+                          Type: {prettifyArtifactType(selectedArtifact.artifact_type)}
+                        </p>
+                        <pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700">
+                          {selectedArtifact.content}
+                        </pre>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500">Select an artifact to view details.</p>
+                    )}
+                  </div>
+                </div>
               )}
-            </div>
+            </section>
           </div>
-        )}
+          <div className="xl:col-span-6">
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+              <h2 className="text-sm font-semibold text-slate-900">Generated Files</h2>
+              {generatedFiles.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">No generated files available yet.</p>
+              ) : (
+                <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-12">
+                  <div className="space-y-2 lg:col-span-5">
+                    {generatedFiles.map((file) => (
+                      <button
+                        key={file.artifact_id}
+                        type="button"
+                        className={`w-full rounded-xl border px-3 py-2 text-left transition ${
+                          file.path === selectedFilePath
+                            ? "border-slate-900 bg-slate-900 text-white"
+                            : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300"
+                        }`}
+                        onClick={() => setSelectedFilePath(file.path)}
+                      >
+                        <p className="truncate text-sm font-semibold">{file.path}</p>
+                        <p
+                          className={`mt-1 text-xs ${
+                            file.path === selectedFilePath ? "text-slate-300" : "text-slate-500"
+                          }`}
+                        >
+                          {formatBytes(file.size_bytes)} | {new Date(file.updated_at).toLocaleString()}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 lg:col-span-7">
+                    {isFileLoading ? (
+                      <p className="text-sm text-slate-500">Loading file...</p>
+                    ) : fileError ? (
+                      <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                        Failed to load file: {fileError}
+                      </p>
+                    ) : selectedFileContent ? (
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="text-sm font-semibold text-slate-900">
+                            {selectedFileContent.path}
+                          </h3>
+                          <span className="text-xs text-slate-500">
+                            {selectedFileContent.language ?? "plain text"}
+                          </span>
+                        </div>
+                        <pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700">
+                          {selectedFileContent.content}
+                        </pre>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500">Select a generated file to view content.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+        </section>
       </section>
-    </section>
+    </main>
   );
 }
 
@@ -509,4 +622,47 @@ function labelForStatus(status: WorkflowStepStatus): string {
 
 function prettifyArtifactType(value: string): string {
   return value.split("_").join(" ");
+}
+
+function isRunLiveUpdatable(status: WorkflowRun["status"] | undefined): boolean {
+  return status === "queued" || status === "running";
+}
+
+function statusPillClass(status: WorkflowRun["status"]): string {
+  if (status === "completed") {
+    return "rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700";
+  }
+  if (status === "failed") {
+    return "rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700";
+  }
+  if (status === "running") {
+    return "rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700";
+  }
+  return "rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600";
+}
+
+function stepStatusPillClass(status: WorkflowStepStatus): string {
+  if (status === "completed") {
+    return "rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700";
+  }
+  if (status === "failed") {
+    return "rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700";
+  }
+  if (status === "in_progress") {
+    return "rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700";
+  }
+  return "rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600";
+}
+
+function liveStatusPillClass(state: LiveConnectionState): string {
+  if (state === "connected") {
+    return "rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700";
+  }
+  if (state === "inactive") {
+    return "rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600";
+  }
+  if (state === "connecting") {
+    return "rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700";
+  }
+  return "rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700";
 }

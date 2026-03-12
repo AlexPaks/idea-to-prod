@@ -1,6 +1,11 @@
 import logging
 from asyncio import to_thread
 
+from app.repositories.artifact_repository import ArtifactRepository
+from app.services.integrations.google_drive_mcp_client import (
+    GoogleDriveMcpClient,
+    GoogleDriveMcpError,
+)
 from app.services.llm.llm_client import (
     LLMConfigurationError,
     LLMInvalidResponseError,
@@ -21,9 +26,27 @@ logger = logging.getLogger(__name__)
 class DetailedDesignService:
     step_name = "detailed_design"
 
-    def __init__(self, llm_client: LLMClient, prompt_loader: PromptLoader) -> None:
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        prompt_loader: PromptLoader,
+        artifact_repository: ArtifactRepository,
+        google_drive_client: GoogleDriveMcpClient | None = None,
+        require_google_drive_read: bool = False,
+    ) -> None:
         self._llm_client = llm_client
         self._prompt_loader = prompt_loader
+        self._artifact_repository = artifact_repository
+        self._google_drive_client = google_drive_client
+        self._require_google_drive_read = require_google_drive_read
+
+    def configure_google_drive(
+        self,
+        google_drive_client: GoogleDriveMcpClient | None,
+        require_google_drive_read: bool,
+    ) -> None:
+        self._google_drive_client = google_drive_client
+        self._require_google_drive_read = require_google_drive_read
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionResult:
         logger.info(
@@ -39,7 +62,13 @@ class DetailedDesignService:
             "Generated implementation-level technical plan with LLM.",
         ]
 
+        high_level_context = ""
+        high_level_context_source = "none"
         try:
+            high_level_context, high_level_context_source = await self._load_high_level_context(
+                context.run.id,
+                context.project.id,
+            )
             prompt = self._prompt_loader.render(
                 "detailed_design.md",
                 {
@@ -47,7 +76,31 @@ class DetailedDesignService:
                     "project_idea": context.project.idea,
                 },
             )
+            if high_level_context:
+                prompt = (
+                    f"{prompt}\n\n"
+                    "## High-Level Design Context\n"
+                    f"{high_level_context}\n"
+                )
+                logs.append(
+                    f"Loaded High-Level Design context from '{high_level_context_source}'."
+                )
+            else:
+                logs.append("No High-Level Design context found; generated from project idea only.")
             design_content = await to_thread(self._llm_client.generate, prompt)
+        except GoogleDriveMcpError as exc:
+            logger.error(
+                "Failed to read high-level design from Google Drive for run '%s': %s",
+                context.run.id,
+                exc,
+            )
+            return StageExecutionResult(
+                step=self.step_name,
+                status="failed",
+                summary="Failed to load High-Level Design from Google Drive",
+                logs=[str(exc)],
+                metadata={"error_type": "google_drive_read"},
+            )
         except LLMConfigurationError as exc:
             logger.warning(
                 "LLM configuration unavailable for detailed design on run '%s': %s",
@@ -131,7 +184,11 @@ class DetailedDesignService:
             artifact_type="detailed_design",
             title="Detailed Technical Design",
             content=design_content.strip(),
-            metadata={"source": design_source, "stage": self.step_name},
+            metadata={
+                "source": design_source,
+                "stage": self.step_name,
+                "high_level_context_source": high_level_context_source,
+            },
         )
 
         return StageExecutionResult(
@@ -141,3 +198,43 @@ class DetailedDesignService:
             artifacts=[artifact],
             metadata={"artifact_count": 1},
         )
+
+    async def _load_high_level_context(self, run_id: str, project_id: str) -> tuple[str, str]:
+        artifacts = await self._artifact_repository.list_by_run_id(run_id)
+        high_level_artifacts = [
+            artifact for artifact in artifacts if artifact.artifact_type == "high_level_design"
+        ]
+        if not high_level_artifacts:
+            return "", "none"
+
+        latest = high_level_artifacts[-1]
+        metadata = latest.metadata if isinstance(latest.metadata, dict) else {}
+        document_id = metadata.get("google_drive_document_id")
+        document_url = metadata.get("google_drive_document_url")
+
+        if self._google_drive_client is not None:
+            has_document_ref = isinstance(document_id, str) or isinstance(document_url, str)
+            if not has_document_ref and self._require_google_drive_read:
+                raise GoogleDriveMcpError(
+                    "High-Level Design artifact is missing Google Drive document metadata"
+                )
+            if has_document_ref:
+                try:
+                    content = await to_thread(
+                        self._google_drive_client.read_document_content,
+                        document_id if isinstance(document_id, str) else None,
+                        document_url if isinstance(document_url, str) else None,
+                        project_id,
+                        run_id,
+                    )
+                except GoogleDriveMcpError:
+                    if self._require_google_drive_read:
+                        raise
+                else:
+                    if content.strip():
+                        return content.strip(), "google_drive"
+
+        if latest.content.strip():
+            return latest.content.strip(), "artifact_fallback"
+
+        return "", "none"

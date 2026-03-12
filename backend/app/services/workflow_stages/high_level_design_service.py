@@ -2,6 +2,10 @@ import logging
 from asyncio import to_thread
 from textwrap import dedent
 
+from app.services.integrations.google_drive_mcp_client import (
+    GoogleDriveMcpClient,
+    GoogleDriveMcpError,
+)
 from app.services.llm.llm_client import (
     LLMConfigurationError,
     LLMInvalidResponseError,
@@ -23,9 +27,25 @@ logger = logging.getLogger(__name__)
 class HighLevelDesignService:
     step_name = "high_level_design"
 
-    def __init__(self, llm_client: LLMClient, prompt_loader: PromptLoader) -> None:
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        prompt_loader: PromptLoader,
+        google_drive_client: GoogleDriveMcpClient | None = None,
+        require_drive_save: bool = False,
+    ) -> None:
         self._llm_client = llm_client
         self._prompt_loader = prompt_loader
+        self._google_drive_client = google_drive_client
+        self._require_drive_save = require_drive_save
+
+    def configure_google_drive(
+        self,
+        google_drive_client: GoogleDriveMcpClient | None,
+        require_drive_save: bool,
+    ) -> None:
+        self._google_drive_client = google_drive_client
+        self._require_drive_save = require_drive_save
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionResult:
         logger.info(
@@ -134,16 +154,79 @@ class HighLevelDesignService:
                 metadata={"error_type": "unexpected"},
             )
 
+        drive_metadata: dict[str, object] = {}
+        drive_save_summary = "Google Drive save skipped"
+        if self._google_drive_client is not None:
+            document_title = (
+                f"{context.project.name} - High Level Design - "
+                f"{context.run.id}"
+            )
+            try:
+                doc_ref = await to_thread(
+                    self._google_drive_client.create_high_level_design_document,
+                    document_title,
+                    design_content.strip(),
+                    context.project.name,
+                    context.project.id,
+                    context.run.id,
+                )
+            except GoogleDriveMcpError as exc:
+                logger.error(
+                    "Failed to save high-level design to Google Drive for run '%s': %s",
+                    context.run.id,
+                    exc,
+                )
+                if self._require_drive_save:
+                    return StageExecutionResult(
+                        step=self.step_name,
+                        status="failed",
+                        summary="Failed to save High-Level Design document to Google Drive",
+                        logs=[str(exc)],
+                        metadata={"error_type": "google_drive_mcp"},
+                    )
+                logs.append(f"Google Drive save failed but workflow continued: {exc}")
+                drive_metadata = {
+                    "google_drive_saved": False,
+                    "google_drive_error": str(exc),
+                }
+                drive_save_summary = "Google Drive save failed"
+            else:
+                drive_metadata = {
+                    "google_drive_saved": True,
+                    "google_drive_document_id": doc_ref.document_id,
+                    "google_drive_document_url": doc_ref.document_url,
+                    "google_drive_document_name": doc_ref.document_name,
+                }
+                logs.append(
+                    "Saved High-Level Design to Google Drive "
+                    f"(id={doc_ref.document_id}, url={doc_ref.document_url})."
+                )
+                drive_save_summary = "Saved High-Level Design document to Google Drive"
+        elif self._require_drive_save:
+            return StageExecutionResult(
+                step=self.step_name,
+                status="failed",
+                summary="Google Drive MCP client is required but not configured",
+                logs=[
+                    "Set GOOGLE_DRIVE_MCP_ENABLED=true and provide Google Drive MCP settings."
+                ],
+                metadata={"error_type": "google_drive_mcp_not_configured"},
+            )
+
         artifact = StageArtifactDraft(
             artifact_type="high_level_design",
             title="High-Level Design",
             content=design_content.strip(),
-            metadata={"source": design_source, "stage": self.step_name},
+            metadata={
+                "source": design_source,
+                "stage": self.step_name,
+                **drive_metadata,
+            },
         )
 
         return StageExecutionResult(
             step=self.step_name,
-            summary="Generated high-level design artifact",
+            summary=f"Generated high-level design artifact. {drive_save_summary}.",
             logs=logs,
             artifacts=[artifact],
             generated_files=[
